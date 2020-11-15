@@ -125,6 +125,7 @@ export const Editable = (props: EditableProps) => {
       isComposing: false,
       isUpdatingSelection: false,
       latestElement: null as DOMElement | null,
+      isDraggingInternally: false,
     }),
     []
   )
@@ -280,7 +281,8 @@ export const Editable = (props: EditableProps) => {
         if (
           selection &&
           Range.isExpanded(selection) &&
-          type.startsWith('delete')
+          type.startsWith('delete') &&
+          type !== 'deleteByDrag'
         ) {
           Editor.deleteFragment(editor)
           return
@@ -288,8 +290,7 @@ export const Editable = (props: EditableProps) => {
 
         switch (type) {
           case 'deleteByComposition':
-          case 'deleteByCut':
-          case 'deleteByDrag': {
+          case 'deleteByCut': {
             Editor.deleteFragment(editor)
             break
           }
@@ -348,7 +349,7 @@ export const Editable = (props: EditableProps) => {
           }
 
           case 'insertFromComposition':
-          case 'insertFromDrop':
+          // case 'insertFromDrop':
           case 'insertFromPaste':
           case 'insertFromYank':
           case 'insertReplacementText':
@@ -690,10 +691,12 @@ export const Editable = (props: EditableProps) => {
 
               // If starting a drag on a void node, make sure it is selected
               // so that it shows up in the selection's fragment.
-              if (voidMatch) {
+              if (voidMatch || node.type === 'image') {
                 const range = Editor.range(editor, path)
                 Transforms.select(editor, range)
               }
+
+              state.isDraggingInternally = true
 
               ReactEditor.setFragmentData(editor, event.dataTransfer)
             }
@@ -707,24 +710,22 @@ export const Editable = (props: EditableProps) => {
               !readOnly &&
               !isEventHandled(event, attributes.onDrop)
             ) {
-              // COMPAT: Certain browsers don't fire `beforeinput` events at all, and
-              // Chromium browsers don't properly fire them for files being
-              // dropped into a `contenteditable`. (2019/11/26)
-              // https://bugs.chromium.org/p/chromium/issues/detail?id=1028668
-              if (
-                !HAS_BEFORE_INPUT_SUPPORT ||
-                (!IS_SAFARI && event.dataTransfer.files.length > 0)
-              ) {
-                event.preventDefault()
-                const range = ReactEditor.findEventRange(editor, event)
-                const data = event.dataTransfer
-                Transforms.select(editor, range)
-                ReactEditor.insertData(editor, data)
+              event.preventDefault()
+              const range = ReactEditor.findEventRange(editor, event)
+              const dragged = editor.selection
+              const data = event.dataTransfer
+              Transforms.select(editor, range)
+              if (state.isDraggingInternally && dragged) {
+                Transforms.delete(editor, { at: dragged })
               }
+              ReactEditor.insertData(editor, data)
             }
           },
           [readOnly, attributes.onDrop]
         )}
+        onDragEnd={useCallback((event: React.DragEvent<HTMLDivElement>) => {
+          state.isDraggingInternally = false
+        }, [])}
         onFocus={useCallback(
           (event: React.FocusEvent<HTMLDivElement>) => {
             if (
